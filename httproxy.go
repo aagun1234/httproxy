@@ -300,23 +300,69 @@ type streamingBody struct {
 }
 
 func (s *streamingBody) Read(p []byte) (n int, err error) {
-	// 如果已经找到双换行符，直接返回缓冲区的数据
-    if s.foundDelim && len(s.buffer) > 0 {
-		//s.buffer中为到分隔符位置的chunk部分内容
+	posDeli:=0
+	s.foundDelim = false
+	for {
+		n, err = s.reader.Read(p)
+		if config.debugLevel>=4 {
+			log.Printf("DEBUG 读取%d字节\n", n)
+		}
+		
+		if n > 0 {
+			s.origBody.Write(p[:n]) // 记录原始内容
+			s.totalSize += n
+
+			// 将新数据追加到缓冲区
+			s.buffer = append(s.buffer, p[:n]...)
+
+			// 检查缓冲区中是否有分隔符
+			if idx := bytes.Index(s.buffer, []byte(config.delimiter)); idx != -1 {
+				s.foundDelim = true
+				// 截取到双换行符后的位置，s.buffer中为到分隔符位置的chunk部分内容
+				//s.buffer[:=idx+len(config.delimiter)]
+				posDeli=idx+len(config.delimiter)
+				if config.debugLevel>=4 {
+					log.Printf("DEBUG 找到分隔符 %d\n",idx)
+					fmt.Println(hexDump(s.buffer))
+				}
+				break 
+			} else {
+				posDeli= len(s.buffer)
+				if config.debugLevel>=4 {
+					log.Printf("DEBUG 还没有找到分隔符\n")
+					fmt.Println(hexDump(s.buffer))
+				}
+			}
+		} else {
+			if config.debugLevel>=4 {
+				log.Printf("DEBUG 读到0字节\n")
+				fmt.Println(hexDump(s.buffer))
+			}
+			if len(s.buffer)>0 {
+				break
+			} else {
+				return 0,err
+			}
+		}
+	}
+	
+	if err == io.EOF {
 		n = copy(p, s.buffer)
 		s.buffer = s.buffer[n:]
+		posDeli=0
+		s.foundDelim=false
 		if config.debugLevel>=3 {
-            log.Printf("=== 从远端收到的流式应答内容 (chunk 大小: %d 字节) ===\n", n)
-            fmt.Println(string(p[:n]))
+			log.Printf("=== 从远端收到的EOF流式应答内容 (chunk 大小: %d 字节) ===\n", n)
+			fmt.Println(string(p[:n]))
 			fmt.Println("=========")
 			if config.debugLevel>=4 { fmt.Println(hexDump(p[:n])) }
-        }
+		}
 		// 修改 chunk 内容
-        if len(s.rules)>0 {
+		if len(s.rules)>0 {
 			modifiedChunk := modifyContent(p[:n], s.rules)
 			n=copy(p, modifiedChunk)
-            if config.debugLevel>=3 {
-				fmt.Println("=== 修改后的应答体 ===")
+			if config.debugLevel>=3 {
+				fmt.Println("=== 修改后的EOF应答体 ===")
 				fmt.Println(string(modifiedChunk))
 				fmt.Println("=========")
 				if config.debugLevel>=4 { fmt.Println(hexDump(modifiedChunk)) }
@@ -326,64 +372,58 @@ func (s *streamingBody) Read(p []byte) (n int, err error) {
 			}
 		} else {
 			if config.debugLevel>=3 {
-				fmt.Println("=== 应答体无需修改 ===")
+				fmt.Println("=== EOF应答体无需修改 ===")
 
 			}
 		}
+		return n, nil
+	} else {
+		idx := bytes.LastIndex(s.buffer, []byte(config.delimiter))
+		if idx == -1 {
+		}
+		posDeli=idx+len(config.delimiter)
+		n = copy(p, s.buffer[:posDeli])
+		s.buffer = s.buffer[n:]
+		if n<posDeli {
+			log.Printf("奇怪，复制分隔符前的内容长度与复制缓冲区的长度不一致\n")
+		}
+		if config.debugLevel>=4 { 
+			log.Printf("DEBUG 根据分隔符截断缓冲区\n")
+			fmt.Println(hexDump(s.buffer)) 
+		}
+		posDeli=0
+		s.foundDelim=false
 
-        return n, nil
-    }
-	
-    n, err = s.reader.Read(p)
-    if n > 0 {
-        s.origBody.Write(p[:n]) // 记录原始内容
-        s.totalSize += n
-
-        // 将新数据追加到缓冲区
-        s.buffer = append(s.buffer, p[:n]...)
-
-        // 检查缓冲区中是否有分隔符
-        if idx := bytes.Index(s.buffer, []byte(config.delimiter)); idx != -1 {
-            s.foundDelim = true
-            // 截取到双换行符后的位置，s.buffer中为到分隔符位置的chunk部分内容
-            s.buffer = s.buffer[:idx+len(config.delimiter)]
-        }
-
-        // 如果找到双换行符或者读取结束，处理并输出
-        if s.foundDelim || err == io.EOF {
-		
-			n = copy(p, s.buffer)
-			s.buffer = s.buffer[n:]
+		if config.debugLevel>=3 {
+			log.Printf("=== 从远端收到的EOF流式应答内容 (chunk 大小: %d 字节) ===\n", n)
+			fmt.Println(string(p[:n]))
+			fmt.Println("=========")
+			if config.debugLevel>=4 { fmt.Println(hexDump(p[:n])) }
+		}
+		// 修改 chunk 内容
+		if len(s.rules)>0 {
+			modifiedChunk := modifyContent(p[:n], s.rules)
+			n=copy(p, modifiedChunk)
 			if config.debugLevel>=3 {
-				log.Printf("=== 从远端收到的流式应答内容 (chunk 大小: %d 字节) ===\n", n)
-				fmt.Println(string(p[:n]))
+				fmt.Println("=== 修改后的EOF应答体 ===")
+				fmt.Println(string(modifiedChunk))
 				fmt.Println("=========")
-				if config.debugLevel>=4 { fmt.Println(hexDump(p[:n])) }
+				if config.debugLevel>=4 { fmt.Println(hexDump(modifiedChunk)) }
 			}
-			// 修改 chunk 内容
-			if len(s.rules)>0 {
-				modifiedChunk := modifyContent(p[:n], s.rules)
-				n=copy(p, modifiedChunk)
-				if config.debugLevel>=3 {
-					fmt.Println("=== 修改后的应答体 ===")
-					fmt.Println(string(modifiedChunk))
-					fmt.Println("=========")
-					if config.debugLevel>=4 { fmt.Println(hexDump(modifiedChunk)) }
-				}
-				if n!=len(modifiedChunk) {
-					log.Printf("奇怪，修改后内容长度与复制缓冲区的长度不一致\n")
-				}
-			} else {
-				if config.debugLevel>=3 {
-					fmt.Println("=== 应答体无需修改 ===")
+			if n!=len(modifiedChunk) {
+				log.Printf("奇怪，修改后内容长度与复制缓冲区的长度不一致\n")
+			}
+		} else {
+			if config.debugLevel>=3 {
+				fmt.Println("=== EOF应答体无需修改 ===")
 
-				}
 			}
-			return n, nil
 		}
-    }
+		return n, nil
+	}
 	
-	// 如果没有找到双换行符且没有错误，返回0,nil让调用者继续读取
+	
+	// 如果没有找到分隔符且没有错误，返回0,nil让调用者继续读取
     if !s.foundDelim && err == nil {
         return 0, nil
     }
