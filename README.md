@@ -9,3 +9,6 @@ or rewrite streaming response
 or insert response header
 
 ./httproxy -listen :8080 -target https://wishub-x1.ctyun.cn -resp-header 'NewHeader::*::$$DATETIME$$'
+
+
+vars: $$DATETIME$$, $$TIME$$, $$DATE$$, $$YEAR$$, $$MONTH$$, $$DAY$$, $$HOUR$$, $$MINUTE$$, $$SECOND$$, $$REQUESTS$$, $$STARTTIME$$, $$RUNNINGTIME$$, $$ClientIP$$, $$CURRENTCONNS$$
