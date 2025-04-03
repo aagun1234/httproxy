@@ -8,4 +8,4 @@ or rewrite streaming response
 
 or insert response header
 
-./httproxy -listen :8080 -target https://wishub-x1.ctyun.cn -resp-header "NewHeader::*::value"
+./httproxy -listen :8080 -target https://wishub-x1.ctyun.cn -resp-header 'NewHeader::*::$$DATETIME$$'
